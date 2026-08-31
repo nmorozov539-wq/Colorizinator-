@@ -135,11 +135,20 @@ export function cutAllZones(sourceBuffer, profileZones = {}) {
 
 // --- CLI-запуск для ручного теста: показывает размеры всех встроенных зон ---
 // Пример: gjs -m zoner.js ~/Pictures/Wallpapers/wall3.png
+//
+// Та же защита от повторного срабатывания при импорте, что и в extractor.js —
+// см. подробный комментарий там. Актуально уже сейчас: analyzer.js в
+// следующем шаге пайплайна будет импортировать cutAllZones() отсюда.
+const isEntryPoint =
+    typeof System !== 'undefined' &&
+    typeof System.programPath === 'string' &&
+    import.meta.url.endsWith(System.programPath.replace(/^.*\//, ''));
+
 const cliArgs = (typeof System !== 'undefined' && System.programArgs)
     ? System.programArgs
     : (typeof ARGV !== 'undefined' ? ARGV : []);
 
-if (cliArgs.length > 0) {
+if (isEntryPoint && cliArgs.length > 0) {
     const path = cliArgs[0];
 
     const buffer = extractPixels(path);
