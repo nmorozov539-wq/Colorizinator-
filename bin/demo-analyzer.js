@@ -10,14 +10,10 @@ import System from 'system';
 import { extractPixels } from '../src/extractor.js';
 import { cutAllZones } from '../src/zoner.js';
 import { analyzeAllZones, rgbToHsl } from '../src/analyzer.js';
+import { swatchLine } from './color-swatch.js';
 
-function fmtRgb({ r, g, b }) {
-    return `rgb(${r},${g},${b})`;
-}
-
-function fmtHsl({ r, g, b }) {
-    const { h, s, l } = rgbToHsl(r, g, b);
-    return `h=${h.toFixed(0)} s=${s.toFixed(2)} l=${l.toFixed(2)}`;
+function line(label, color) {
+    return `  ${label.padEnd(16)}${swatchLine(color, rgbToHsl(color.r, color.g, color.b))}`;
 }
 
 const args = System.programArgs;
@@ -33,12 +29,12 @@ if (args.length === 0) {
 
     for (const [name, a] of Object.entries(analysis)) {
         print(`--- ${name} (${a.pixelCount}px, uniformity=${a.uniformity.toFixed(2)}) ---`);
-        print(`  darkest:        ${fmtRgb(a.darkest)}  ${fmtHsl(a.darkest)}`);
-        print(`  lightest:       ${fmtRgb(a.lightest)}  ${fmtHsl(a.lightest)}`);
-        print(`  mostSaturated:  ${fmtRgb(a.mostSaturated)}  ${fmtHsl(a.mostSaturated)}`);
-        print(`  leastSaturated: ${fmtRgb(a.leastSaturated)}  ${fmtHsl(a.leastSaturated)}`);
-        print(`  dominant:       ${fmtRgb(a.dominant)}  ${fmtHsl(a.dominant)}`);
-        print(`  average:        ${fmtRgb(a.average)}  ${fmtHsl(a.average)}`);
+        print(line('darkest:', a.darkest));
+        print(line('lightest:', a.lightest));
+        print(line('mostSaturated:', a.mostSaturated));
+        print(line('leastSaturated:', a.leastSaturated));
+        print(line('dominant:', a.dominant));
+        print(line('average:', a.average));
         print('');
     }
 }
