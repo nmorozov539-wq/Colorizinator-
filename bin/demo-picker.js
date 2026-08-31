@@ -45,6 +45,22 @@ const args = System.programArgs;
 
 if (args.length === 0) {
     printerr('Использование: gjs -m bin/demo-picker.js <путь-к-изображению>');
+    printerr('           или: gjs -m bin/demo-picker.js --test-contrast  (синтетическая проверка автокоррекции)');
+} else if (args[0] === '--test-contrast') {
+    // Синтетическая проверка: два похожих пастельных цвета с заведомо
+    // низким ratio (~1.23), чтобы убедиться, что автокоррекция реально
+    // срабатывает, а не просто "не ломается" на случаях, где и так всё ок.
+    const bg = { r: 180, g: 170, b: 200 };
+    const fg = { r: 200, g: 190, b: 210 };
+
+    const before = contrastRatio(bg, fg);
+    const { colors, debug } = applyContrastCheck({ bg, fg });
+
+    print('=== Синтетический тест автокоррекции ===');
+    print(`  bg (не трогается) ${swatch(bg)}  rgb(${bg.r},${bg.g},${bg.b})`);
+    print(`  fg (исходный)     ${swatch(fg)}  rgb(${fg.r},${fg.g},${fg.b})   ratio до: ${before.toFixed(2)}:1`);
+    print(`  fg (после):       ${swatch(colors.fg)}  rgb(${colors.fg.r},${colors.fg.g},${colors.fg.b})`);
+    print(`  ${JSON.stringify(debug)}`);
 } else {
     const path = args[0];
 
