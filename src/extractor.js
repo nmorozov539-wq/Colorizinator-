@@ -10,10 +10,9 @@
 // т.к. каждый get_pixel() пересекает границу JS↔C биндингов отдельно.
 // Критерий приёмки ТЗ п.16: генерация CSS < 500ms на 1920x1080.
 
-imports.gi.versions.Gtk = '4.0';
-imports.gi.versions.GdkPixbuf = '2.0';
-
-const { GdkPixbuf, GLib } = imports.gi;
+import GdkPixbuf from 'gi://GdkPixbuf?version=2.0';
+import GLib from 'gi://GLib';
+import System from 'system';
 
 /**
  * Максимальная сторона изображения после downscale.
@@ -41,7 +40,7 @@ const DEFAULT_MAX_DIMENSION = 256;
  *   pixels: Uint8Array
  * }}
  */
-function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION) {
+export function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION) {
     let original;
     try {
         original = GdkPixbuf.Pixbuf.new_from_file(imagePath);
@@ -90,7 +89,7 @@ function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION) {
  * @param {number} y
  * @returns {{r: number, g: number, b: number, a: number}}
  */
-function getPixelAt(buffer, x, y) {
+export function getPixelAt(buffer, x, y) {
     const { pixels, rowstride, channels } = buffer;
     const offset = y * rowstride + x * channels;
 
@@ -103,20 +102,50 @@ function getPixelAt(buffer, x, y) {
 }
 
 // --- CLI-запуск для ручного теста модуля отдельно от остального пайплайна ---
-// Пример: gjs -m extractor.js ~/Pictures/wall.jpg
-if (ARGV.length > 0) {
-    const path = ARGV[0];
-    const maxDim = ARGV[1] ? parseInt(ARGV[1], 10) : DEFAULT_MAX_DIMENSION;
+// Пример: gjs -m extractor.js ~/Pictures/Wallpapers/wall.jpg
+// System.programArgs — современный способ (всегда определён); ARGV — тоже
+// рабочий вариант в GJS, оставлен как fallback на случай другой версии gjs.
+const cliArgs = (typeof System !== 'undefined' && System.programArgs)
+    ? System.programArgs
+    : (typeof ARGV !== 'undefined' ? ARGV : []);
 
-    const t0 = GLib.get_monotonic_time();
-    const buf = extractPixels(path, maxDim);
-    const elapsedMs = (GLib.get_monotonic_time() - t0) / 1000;
+if (cliArgs.length > 0) {
+    const path = cliArgs[0];
+    const maxDim = cliArgs[1] ? parseInt(cliArgs[1], 10) : DEFAULT_MAX_DIMENSION;
+
+    const tStart = GLib.get_monotonic_time();
+
+    const original = GdkPixbuf.Pixbuf.new_from_file(path);
+    const tDecode = GLib.get_monotonic_time();
+
+    const { width: origW, height: origH } = original;
+    const scale = Math.min(maxDim / origW, maxDim / origH, 1);
+    const scaledW = Math.max(1, Math.round(origW * scale));
+    const scaledH = Math.max(1, Math.round(origH * scale));
+    const scaled = (scale < 1)
+        ? original.scale_simple(scaledW, scaledH, GdkPixbuf.InterpType.BILINEAR)
+        : original;
+    const tScale = GLib.get_monotonic_time();
+
+    const pixels = scaled.get_pixels();
+    const tRead = GLib.get_monotonic_time();
+
+    const decodeMs = (tDecode - tStart) / 1000;
+    const scaleMs = (tScale - tDecode) / 1000;
+    const readMs = (tRead - tScale) / 1000;
+    const totalMs = (tRead - tStart) / 1000;
 
     print(`Файл: ${path}`);
-    print(`Размер после downscale: ${buf.width}x${buf.height} (channels=${buf.channels}, alpha=${buf.hasAlpha})`);
-    print(`Время extractPixels(): ${elapsedMs.toFixed(2)}ms`);
+    print(`Оригинал: ${origW}x${origH} → после downscale: ${scaledW}x${scaledH}`);
+    print(`  decode (new_from_file):  ${decodeMs.toFixed(2)}ms`);
+    print(`  scale (scale_simple):    ${scaleMs.toFixed(2)}ms`);
+    print(`  read (get_pixels):       ${readMs.toFixed(2)}ms`);
+    print(`  ИТОГО:                   ${totalMs.toFixed(2)}ms`);
 
-    // Сэмпл — цвет центрального пикселя, просто чтобы убедиться, что buffer живой
-    const center = getPixelAt(buf, Math.floor(buf.width / 2), Math.floor(buf.height / 2));
+    const center = getPixelAt(
+        { pixels, rowstride: scaled.get_rowstride(), channels: scaled.get_n_channels() },
+        Math.floor(scaledW / 2),
+        Math.floor(scaledH / 2)
+    );
     print(`Пиксель в центре: rgb(${center.r}, ${center.g}, ${center.b})`);
 }
