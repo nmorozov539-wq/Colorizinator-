@@ -12,7 +12,6 @@
 
 import GdkPixbuf from 'gi://GdkPixbuf?version=2.0';
 import GLib from 'gi://GLib';
-import System from 'system';
 
 /**
  * Максимальная сторона изображения после downscale.
@@ -101,18 +100,16 @@ export function getPixelAt(buffer, x, y) {
     };
 }
 
-// --- CLI-запуск для ручного теста модуля отдельно от остального пайплайна ---
-// Пример: gjs -m extractor.js ~/Pictures/Wallpapers/wall.jpg
-// System.programArgs — современный способ (всегда определён); ARGV — тоже
-// рабочий вариант в GJS, оставлен как fallback на случай другой версии gjs.
-const cliArgs = (typeof System !== 'undefined' && System.programArgs)
-    ? System.programArgs
-    : (typeof ARGV !== 'undefined' ? ARGV : []);
-
-if (cliArgs.length > 0) {
-    const path = cliArgs[0];
-    const maxDim = cliArgs[1] ? parseInt(cliArgs[1], 10) : DEFAULT_MAX_DIMENSION;
-
+/**
+ * Ручной тестовый прогон extractor'а с выводом тайминга по этапам.
+ * Вызывается явно из CLI-блока ниже — НЕ выполняется автоматически при
+ * импорте extractor.js из другого модуля (zoner.js и т.д.), в отличие от
+ * кода на верхнем уровне модуля, который выполнился бы при любом импорте.
+ *
+ * @param {string} path
+ * @param {number} maxDim
+ */
+export function runCliDemo(path, maxDim = DEFAULT_MAX_DIMENSION) {
     const tStart = GLib.get_monotonic_time();
 
     const original = GdkPixbuf.Pixbuf.new_from_file(path);
@@ -149,3 +146,10 @@ if (cliArgs.length > 0) {
     );
     print(`Пиксель в центре: rgb(${center.r}, ${center.g}, ${center.b})`);
 }
+
+// extractor.js — ЧИСТЫЙ библиотечный модуль, никакого кода верхнего уровня
+// с побочными эффектами. Демо-запуск теперь в bin/demo-extractor.js — так
+// импорт этого файла из zoner.js/analyzer.js гарантированно ничего не печатает
+// и не читает CLI-аргументы, вне зависимости от поведения System.programPath
+// (не удалось надёжно определить entry-point через него на практике — см.
+// git-историю, попытка с programPath не устранила дублирование вывода).
