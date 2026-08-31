@@ -11,6 +11,7 @@ import { extractPixels } from '../src/extractor.js';
 import { cutAllZones } from '../src/zoner.js';
 import { analyzeAllZones, rgbToHsl } from '../src/analyzer.js';
 import { pickRoles } from '../src/picker.js';
+import { applyContrastCheck, contrastRatio } from '../src/contrast.js';
 import { swatch } from './color-swatch.js';
 
 // Тестовый профиль — упрощённая версия mycyber из ТЗ, но на встроенных зонах
@@ -50,9 +51,12 @@ if (args.length === 0) {
     const buffer = extractPixels(path);
     const zones = cutAllZones(buffer, {});
     const analysis = analyzeAllZones(zones);
-    const { colors, debug } = pickRoles(analysis, TEST_ROLES);
+    const { colors: rawColors, debug: pickerDebug } = pickRoles(analysis, TEST_ROLES);
 
-    print('=== Выбранные роли ===');
+    const before = rawColors.bg && rawColors.fg ? contrastRatio(rawColors.bg, rawColors.fg) : null;
+    const { colors, debug: contrastDebug } = applyContrastCheck(rawColors);
+
+    print('=== Выбранные роли (после contrast-check) ===');
     for (const [roleName, color] of Object.entries(colors)) {
         const { h, s, l } = rgbToHsl(color.r, color.g, color.b);
         print(
@@ -62,8 +66,15 @@ if (args.length === 0) {
     }
 
     print('');
-    print('=== Debug-трейс ===');
-    for (const d of debug) {
+    print('=== Contrast-check (bg/fg, WCAG AA >= 4.5) ===');
+    if (before !== null) {
+        print(`  до коррекции:  ${before.toFixed(2)}:1`);
+    }
+    print(`  ${JSON.stringify(contrastDebug)}`);
+
+    print('');
+    print('=== Debug-трейс picker ===');
+    for (const d of pickerDebug) {
         print(`  ${JSON.stringify(d)}`);
     }
 }
