@@ -103,6 +103,30 @@ function quantize(zone, bucket = 16) {
 }
 
 /**
+ * "Эффективная" насыщенность для целей picker'а — НЕ то же самое, что чистая
+ * HSL-saturation. У HSL-saturation есть математическая особенность: у почти
+ * чёрных или почти белых пикселей s может быть близка к 1.0 при мизерной
+ * разнице между каналами (например rgb(3,2,0) → s≈1.0), хотя визуально это
+ * шум/тень, а не "насыщенный цвет" в человеческом понимании.
+ *
+ * Штрафуем saturation на приближении lightness к 0 или к 1, чтобы кандидат
+ * на mostSaturated не мог быть одновременно почти чёрным. Вес подобран так,
+ * чтобы не отсеивать честные тёмно-насыщенные цвета (l=0.2-0.3 с высоким s
+ * остаются кандидатами), но резать вырожденный случай l<0.05.
+ *
+ * @param {number} s - HSL saturation (0..1)
+ * @param {number} l - HSL lightness (0..1)
+ * @returns {number} 0..1
+ */
+function effectiveSaturation(s, l) {
+    // Треугольная весовая функция: пик в l=0.5, спад к 0 на l=0 и l=1.
+    // На l=0.05 и l=0.95 вес уже ~0.1 — почти полностью гасит вырожденный
+    // случай, но не резко (без разрыва), чтобы не создавать новый артефакт.
+    const lightnessWeight = 1 - Math.pow(Math.abs(l - 0.5) * 2, 2);
+    return s * Math.max(0, lightnessWeight);
+}
+
+/**
  * Полный анализ зоны — единственный проход по пикселям, дающий кандидатов
  * под все стратегии picker'а разом (ТЗ п.5.2).
  *
@@ -128,7 +152,7 @@ export function analyzeZone(zone) {
 
     let darkest = null, darkestL = Infinity;
     let lightest = null, lightestL = -Infinity;
-    let mostSaturated = null, mostSaturatedS = -Infinity;
+    let mostSaturated = null, mostSaturatedEffS = -Infinity;
     let leastSaturated = null, leastSaturatedS = Infinity;
 
     let sumR = 0, sumG = 0, sumB = 0;
@@ -147,7 +171,15 @@ export function analyzeZone(zone) {
 
         if (l < darkestL) { darkestL = l; darkest = { r, g, b }; }
         if (l > lightestL) { lightestL = l; lightest = { r, g, b }; }
-        if (s > mostSaturatedS) { mostSaturatedS = s; mostSaturated = { r, g, b }; }
+
+        // mostSaturated использует effectiveSaturation (штраф на около-чёрное/
+        // около-белое) — см. комментарий к effectiveSaturation() выше.
+        const effS = effectiveSaturation(s, l);
+        if (effS > mostSaturatedEffS) { mostSaturatedEffS = effS; mostSaturated = { r, g, b }; }
+
+        // leastSaturated — чистая HSL s, тут проблема не возникает: самый
+        // тусклый ищем среди ВСЕХ пикселей, включая чёрное/белое (это
+        // корректные кандидаты на "минимально насыщенный").
         if (s < leastSaturatedS) { leastSaturatedS = s; leastSaturated = { r, g, b }; }
 
         sumR += r; sumG += g; sumB += b;
