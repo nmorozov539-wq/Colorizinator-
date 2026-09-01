@@ -189,6 +189,18 @@ export function runCliDemo(path, maxDim = DEFAULT_MAX_DIMENSION) {
     print(`  colorspace:      ${scaled.get_colorspace()}`);
     const rawFirst12 = Array.from(pixels.slice(0, 12));
     print(`  первые 12 байт буфера: [${rawFirst12.join(', ')}]`);
+
+    // --- Дамп ВСЕЙ верхней строки пикселей (y=0) как r,g,b троек (без alpha).
+    // На фото Фудзи верхний край — это небо, должно быть плавным градиентом
+    // без резких 0/255 скачков. Если увидим скачки — проблема в decode/scale,
+    // не в offset-математике analyzer.js (та уже проверена отдельно).
+    print('');
+    print('--- Дамп строки y=0 (первые 20 пикселей, r,g,b) ---');
+    const nCh = scaled.get_n_channels();
+    for (let x = 0; x < Math.min(20, scaledW); x++) {
+        const p = getPixelAt({ pixels, rowstride, channels: nCh }, x, 0);
+        print(`  x=${String(x).padStart(3)}: r=${String(p.r).padStart(3)} g=${String(p.g).padStart(3)} b=${String(p.b).padStart(3)}`);
+    }
 }
 
 // extractor.js — ЧИСТЫЙ библиотечный модуль, никакого кода верхнего уровня
