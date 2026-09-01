@@ -178,6 +178,17 @@ export function runCliDemo(path, maxDim = DEFAULT_MAX_DIMENSION) {
     if (lastPixel.r === undefined) {
         print(`  ⚠ ПОДТВЕРЖДЕНО: чтение за пределами буфера даёт undefined`);
     }
+
+    // --- Диагностика формата пикселей: исключаем рассинхронизацию каналов
+    // (например если реально RGBA, а мы читаем как RGB со сдвигом).
+    print('');
+    print('--- Диагностика формата пикселей ---');
+    print(`  channels:        ${scaled.get_n_channels()}`);
+    print(`  hasAlpha:        ${scaled.get_has_alpha()}`);
+    print(`  bits_per_sample: ${scaled.get_bits_per_sample()}`);
+    print(`  colorspace:      ${scaled.get_colorspace()}`);
+    const rawFirst12 = Array.from(pixels.slice(0, 12));
+    print(`  первые 12 байт буфера: [${rawFirst12.join(', ')}]`);
 }
 
 // extractor.js — ЧИСТЫЙ библиотечный модуль, никакого кода верхнего уровня
