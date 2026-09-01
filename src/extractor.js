@@ -145,6 +145,39 @@ export function runCliDemo(path, maxDim = DEFAULT_MAX_DIMENSION) {
         Math.floor(scaledH / 2)
     );
     print(`Пиксель в центре: rgb(${center.r}, ${center.g}, ${center.b})`);
+
+    // --- Диагностика: проверяем реальную длину буфера против ожидаемой.
+    // ГИПОТЕЗА (не подтверждена): GdkPixbuf.get_pixels() в GJS может
+    // возвращать Uint8Array короче, чем rowstride*height, если последняя
+    // строка изображения не занимает полный rowstride (задокументированное
+    // поведение GdkPixbuf на уровне C API) — тогда offset-чтение в
+    // getPixelAt()/analyzer.js уходит за пределы массива и получает
+    // undefined вместо реального байта.
+    const rowstride = scaled.get_rowstride();
+    const expectedLength = rowstride * scaledH;
+    const actualLength = pixels.length;
+    print('');
+    print('--- Диагностика длины буфера ---');
+    print(`  rowstride:            ${rowstride}`);
+    print(`  height:               ${scaledH}`);
+    print(`  ожидаемая длина:      ${expectedLength} (rowstride * height)`);
+    print(`  реальная длина:       ${actualLength} (pixels.length)`);
+    print(`  совпадает:            ${expectedLength === actualLength}`);
+    if (actualLength < expectedLength) {
+        print(`  ⚠ БУФЕР КОРОЧЕ ОЖИДАЕМОГО на ${expectedLength - actualLength} байт!`);
+    }
+
+    // Дополнительно: пробуем прочитать последний пиксель последней строки —
+    // если гипотеза верна, это вернёт undefined вместо числа.
+    const lastPixel = getPixelAt(
+        { pixels, rowstride, channels: scaled.get_n_channels() },
+        scaledW - 1,
+        scaledH - 1
+    );
+    print(`  последний пиксель:    r=${lastPixel.r} g=${lastPixel.g} b=${lastPixel.b}`);
+    if (lastPixel.r === undefined) {
+        print(`  ⚠ ПОДТВЕРЖДЕНО: чтение за пределами буфера даёт undefined`);
+    }
 }
 
 // extractor.js — ЧИСТЫЙ библиотечный модуль, никакого кода верхнего уровня
