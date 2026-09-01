@@ -127,8 +127,28 @@ function effectiveSaturation(s, l) {
 }
 
 /**
+ * Минимальная доля зоны, которую должна занимать квантованная группа цвета,
+ * чтобы считаться кандидатом на darkest/lightest/mostSaturated/leastSaturated.
+ * Пользовательский кейс: на wall10.png один пиксель солнечного блика после
+ * downscale (rgb 255,255,255) побеждал в конкурсе на "lightest" зоны из
+ * тысяч пикселей — визуально невидимый артефакт диктовал весь bg/fg. Порог
+ * 0.5% отсекает единичные/редкие пиксели, но не мешает честному крупному
+ * пятну (даже маленькая, но реальная деталь на фото обычно занимает больше
+ * 0.5% зоны после downscale до ~256px).
+ */
+const MIN_CANDIDATE_SHARE = 0.005;
+
+/**
  * Полный анализ зоны — единственный проход по пикселям, дающий кандидатов
  * под все стратегии picker'а разом (ТЗ п.5.2).
+ *
+ * darkest/lightest/mostSaturated/leastSaturated ищутся СРЕДИ КВАНТОВАННЫХ
+ * ГРУПП (не отдельных пикселей) с count >= MIN_CANDIDATE_SHARE * pixelCount —
+ * это защищает от единичных пикселей-выбросов (блики, шум, JPEG-артефакты
+ * на границах), которые иначе могли бы в одиночку продиктовать весь bg/fg
+ * через WCAG-коррекцию (см. историю с wall10.png). average/uniformity
+ * по-прежнему считаются по ВСЕМ пикселям без исключений — там единичный
+ * выброс и так тонет в сумме, фильтр им не нужен.
  *
  * @param {{width:number,height:number,channels:number,pixels:Uint8Array}} zone
  * @returns {{
@@ -150,15 +170,9 @@ export function analyzeZone(zone) {
         throw new Error('analyzeZone: зона пустая (0 пикселей)');
     }
 
-    let darkest = null, darkestL = Infinity;
-    let lightest = null, lightestL = -Infinity;
-    let mostSaturated = null, mostSaturatedEffS = -Infinity;
-    let leastSaturated = null, leastSaturatedS = Infinity;
-
+    // --- Проход 1: average/uniformity считаются по ВСЕМ пикселям без
+    // исключений (агрегирующие метрики, выброс и так тонет в сумме).
     let sumR = 0, sumG = 0, sumB = 0;
-    // Для uniformity считаем дисперсию luminance — низкая дисперсия значит
-    // зона однородная (как "sky" в мысленном эксперименте с киберпанком),
-    // высокая — зона "шумная" (как neon-bottom с отражениями).
     let sumL = 0, sumL2 = 0;
 
     for (let i = 0; i < pixelCount; i++) {
@@ -166,21 +180,7 @@ export function analyzeZone(zone) {
         const r = pixels[offset];
         const g = pixels[offset + 1];
         const b = pixels[offset + 2];
-
-        const { s, l } = rgbToHsl(r, g, b);
-
-        if (l < darkestL) { darkestL = l; darkest = { r, g, b }; }
-        if (l > lightestL) { lightestL = l; lightest = { r, g, b }; }
-
-        // mostSaturated использует effectiveSaturation (штраф на около-чёрное/
-        // около-белое) — см. комментарий к effectiveSaturation() выше.
-        const effS = effectiveSaturation(s, l);
-        if (effS > mostSaturatedEffS) { mostSaturatedEffS = effS; mostSaturated = { r, g, b }; }
-
-        // leastSaturated — чистая HSL s, тут проблема не возникает: самый
-        // тусклый ищем среди ВСЕХ пикселей, включая чёрное/белое (это
-        // корректные кандидаты на "минимально насыщенный").
-        if (s < leastSaturatedS) { leastSaturatedS = s; leastSaturated = { r, g, b }; }
+        const { l } = rgbToHsl(r, g, b);
 
         sumR += r; sumG += g; sumB += b;
         sumL += l; sumL2 += l * l;
@@ -194,13 +194,41 @@ export function analyzeZone(zone) {
 
     const meanL = sumL / pixelCount;
     const varianceL = (sumL2 / pixelCount) - (meanL * meanL);
-    // uniformity: 1 = абсолютно однородная зона, 0 = максимально разнородная.
-    // varianceL у luminance (0..1) физически ограничена сверху ~0.25,
-    // нормализуем к этому потолку, чтобы получить интуитивный диапазон 0..1.
     const uniformity = Math.max(0, 1 - Math.min(1, varianceL / 0.25));
 
+    // --- Проход 2 (переиспользует quantize()): darkest/lightest/
+    // mostSaturated/leastSaturated ищутся среди квантованных групп,
+    // отфильтрованных по минимальному count — см. MIN_CANDIDATE_SHARE.
     const quantized = quantize(zone);
-    const dominant = quantized[0]; // самый частый квантованный цвет
+    const minCount = Math.max(1, Math.ceil(pixelCount * MIN_CANDIDATE_SHARE));
+    let candidates = quantized.filter((g) => g.count >= minCount);
+
+    // Если фильтр отсёк ВСЕ группы (крайний случай — очень мелкая зона или
+    // все цвета уникальны), откатываемся к полному списку без фильтра, а не
+    // падаем с пустым результатом. Лучше честно вернуться к старому
+    // поведению для этой зоны, чем выбросить исключение на границе.
+    if (candidates.length === 0) {
+        candidates = quantized;
+    }
+
+    let darkest = null, darkestL = Infinity;
+    let lightest = null, lightestL = -Infinity;
+    let mostSaturated = null, mostSaturatedEffS = -Infinity;
+    let leastSaturated = null, leastSaturatedS = Infinity;
+
+    for (const c of candidates) {
+        const { s, l } = rgbToHsl(c.r, c.g, c.b);
+
+        if (l < darkestL) { darkestL = l; darkest = { r: c.r, g: c.g, b: c.b }; }
+        if (l > lightestL) { lightestL = l; lightest = { r: c.r, g: c.g, b: c.b }; }
+
+        const effS = effectiveSaturation(s, l);
+        if (effS > mostSaturatedEffS) { mostSaturatedEffS = effS; mostSaturated = { r: c.r, g: c.g, b: c.b }; }
+
+        if (s < leastSaturatedS) { leastSaturatedS = s; leastSaturated = { r: c.r, g: c.g, b: c.b }; }
+    }
+
+    const dominant = quantized[0]; // самый частый квантованный цвет (без фильтра — dominant это и есть "самый частый")
 
     return {
         darkest,
