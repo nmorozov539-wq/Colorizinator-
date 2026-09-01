@@ -190,18 +190,26 @@ export function runCliDemo(path, maxDim = DEFAULT_MAX_DIMENSION) {
     const rawFirst12 = Array.from(pixels.slice(0, 12));
     print(`  первые 12 байт буфера: [${rawFirst12.join(', ')}]`);
 
-    // --- Дамп СРЕДНЕЙ строки пикселей (y = height/2) как r,g,b троек.
-    // y=0 оказался чёрным фоном между ветками сакуры (честный результат,
-    // не баг) — эта строка ближе к центру кадра, где физически должны
-    // быть гора/небо, а не декоративные ветки по краю.
+    // --- Прямой поиск экстремумов внутри РЕАЛЬНЫХ границ top-зоны (y=0..20
+    // для этого разрешения, crop "0,0,100,15"). Раньше проверяли отдельные
+    // строки (y=0 — честный чёрный, y=72 — честный плавный) — теперь считаем
+    // min/max luminance по ВСЕЙ top-зоне разом, чтобы окончательно понять,
+    // является ли lightest=255,255,255 честным бликом внутри неё или багом.
     print('');
-    const midY = Math.floor(scaledH / 2);
-    print(`--- Дамп строки y=${midY} (середина кадра, первые 30 пикселей, r,g,b) ---`);
+    const topZoneHeight = Math.ceil(scaledH * 0.15);
+    print(`--- Поиск экстремумов в top-зоне (y=0..${topZoneHeight - 1}, честная проверка без zoner.js) ---`);
     const nCh = scaled.get_n_channels();
-    for (let x = 0; x < Math.min(30, scaledW); x++) {
-        const p = getPixelAt({ pixels, rowstride, channels: nCh }, x, midY);
-        print(`  x=${String(x).padStart(3)}: r=${String(p.r).padStart(3)} g=${String(p.g).padStart(3)} b=${String(p.b).padStart(3)}`);
+    let minSum = 765, maxSum = -1, minPos = null, maxPos = null;
+    for (let y = 0; y < topZoneHeight; y++) {
+        for (let x = 0; x < scaledW; x++) {
+            const p = getPixelAt({ pixels, rowstride, channels: nCh }, x, y);
+            const sum = p.r + p.g + p.b;
+            if (sum < minSum) { minSum = sum; minPos = { x, y, ...p }; }
+            if (sum > maxSum) { maxSum = sum; maxPos = { x, y, ...p }; }
+        }
     }
+    print(`  самый тёмный:  x=${minPos.x} y=${minPos.y}  rgb(${minPos.r},${minPos.g},${minPos.b})`);
+    print(`  самый светлый: x=${maxPos.x} y=${maxPos.y}  rgb(${maxPos.r},${maxPos.g},${maxPos.b})`);
 }
 
 // extractor.js — ЧИСТЫЙ библиотечный модуль, никакого кода верхнего уровня
