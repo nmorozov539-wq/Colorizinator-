@@ -190,15 +190,16 @@ export function runCliDemo(path, maxDim = DEFAULT_MAX_DIMENSION) {
     const rawFirst12 = Array.from(pixels.slice(0, 12));
     print(`  первые 12 байт буфера: [${rawFirst12.join(', ')}]`);
 
-    // --- Дамп ВСЕЙ верхней строки пикселей (y=0) как r,g,b троек (без alpha).
-    // На фото Фудзи верхний край — это небо, должно быть плавным градиентом
-    // без резких 0/255 скачков. Если увидим скачки — проблема в decode/scale,
-    // не в offset-математике analyzer.js (та уже проверена отдельно).
+    // --- Дамп СРЕДНЕЙ строки пикселей (y = height/2) как r,g,b троек.
+    // y=0 оказался чёрным фоном между ветками сакуры (честный результат,
+    // не баг) — эта строка ближе к центру кадра, где физически должны
+    // быть гора/небо, а не декоративные ветки по краю.
     print('');
-    print('--- Дамп строки y=0 (первые 20 пикселей, r,g,b) ---');
+    const midY = Math.floor(scaledH / 2);
+    print(`--- Дамп строки y=${midY} (середина кадра, первые 30 пикселей, r,g,b) ---`);
     const nCh = scaled.get_n_channels();
-    for (let x = 0; x < Math.min(20, scaledW); x++) {
-        const p = getPixelAt({ pixels, rowstride, channels: nCh }, x, 0);
+    for (let x = 0; x < Math.min(30, scaledW); x++) {
+        const p = getPixelAt({ pixels, rowstride, channels: nCh }, x, midY);
         print(`  x=${String(x).padStart(3)}: r=${String(p.r).padStart(3)} g=${String(p.g).padStart(3)} b=${String(p.b).padStart(3)}`);
     }
 }
