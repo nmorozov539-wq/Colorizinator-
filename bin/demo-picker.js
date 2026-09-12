@@ -14,17 +14,19 @@ import { pickRoles } from '../src/picker.js';
 import { applyContrastCheck, contrastRatio } from '../src/contrast.js';
 import { swatch } from './color-swatch.js';
 
-// Тестовый профиль — упрощённая версия mycyber из ТЗ, но на встроенных зонах
-// (top/bottom/full), чтобы не тащить в первый прогон ещё и кастомные zones.
+// TEST_ROLES v2 — bg и fg из РАЗНЫХ зон (bottom/top), см. подробный
+// комментарий в demo-formatter.js. Три прогона подряд на одной зоне для
+// обеих ролей систематически проваливали WCAG-контраст.
 const TEST_ROLES = {
     bg: {
         pick: 'darkest',
-        from: 'top',
+        from: 'bottom',
         fallback: 'full',
     },
     fg: {
         pick: 'lightest',
         from: 'top',
+        fallback: 'full',
     },
     accent: {
         pick: 'most-saturated',
