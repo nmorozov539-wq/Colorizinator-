@@ -51,6 +51,12 @@ export function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION, o
         throw new Error(`Не удалось открыть изображение "${imagePath}": ${e.message}`);
     }
 
+    // EXIF-ориентация: без этого фото, сохранённое «лёжа» с тегом поворота,
+    // читалось бы боком, и зоны top/bottom/left/right менялись бы местами.
+    // Вернёт null, если в файле нет тега ориентации.
+    const oriented = original.apply_embedded_orientation();
+    if (oriented) original = oriented;
+
     const { width: origW, height: origH } = original;
 
     // Downscale с сохранением aspect ratio — длинная сторона = maxDimension.

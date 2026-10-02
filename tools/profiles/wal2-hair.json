@@ -1,0 +1,12 @@
+{
+  "zones": {
+    "hair": { "crop": "34,3,24,14" }
+  },
+  "roles": {
+    "bg":      { "pick": "darkest",         "from": "bottom", "fallback": "full" },
+    "fg":      { "pick": "lightest",        "from": "top",    "fallback": "full" },
+    "accent":  { "pick": "most-saturated",  "from": "hair",   "fallback": "full" },
+    "muted":   { "pick": "least-saturated", "from": "top" },
+    "surface": { "pick": "between-bg-fg" }
+  }
+}
