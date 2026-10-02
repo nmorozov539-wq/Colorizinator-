@@ -113,15 +113,28 @@ function pickRole(roleName, roleConfig, analysis, resolvedRoles) {
     }
 
     // --- Direct-стратегии: ищем primary-зону, при провале — fallback.
-    const primaryZoneName = roleConfig.from || 'full';
-    const primaryZone = analysis[primaryZoneName];
+    let primaryZoneName = roleConfig.from || 'full';
+    let primaryZone = analysis[primaryZoneName];
     if (!primaryZone) {
         throw new Error(`pickRole("${roleName}"): зона "${primaryZoneName}" не найдена в analysis (проверь профиль)`);
     }
 
+    // Зона может быть пустой (целиком прозрачная) — тогда берём fallback,
+    // а если и он пуст/не задан — зону 'full'.
+    let fallbackTriggered = false;
+    if (primaryZone.empty) {
+        const alternatives = [roleConfig.fallback, 'full'].filter((n) => n && analysis[n] && !analysis[n].empty);
+        if (alternatives.length === 0) {
+            throw new Error(`pickRole("${roleName}"): изображение не содержит непрозрачных пикселей`);
+        }
+        debug.emptyPrimaryZone = primaryZoneName;
+        primaryZoneName = alternatives[0];
+        primaryZone = analysis[primaryZoneName];
+        fallbackTriggered = true;
+    }
+
     let candidate = pickDirect(primaryZone, roleConfig.pick);
     let usedZone = primaryZoneName;
-    let fallbackTriggered = false;
 
     // min-saturation проверяем ТОЛЬКО если он задан в профиле (не все роли
     // его требуют — например bg/muted намеренно могут быть малонасыщенными).
@@ -129,7 +142,7 @@ function pickRole(roleName, roleConfig, analysis, resolvedRoles) {
         const { s } = rgbToHsl(candidate.r, candidate.g, candidate.b);
         if (s < roleConfig['min-saturation'] && roleConfig.fallback) {
             const fallbackZone = analysis[roleConfig.fallback];
-            if (fallbackZone) {
+            if (fallbackZone && !fallbackZone.empty) {
                 const fallbackCandidate = pickDirect(fallbackZone, roleConfig.pick);
                 const fallbackS = rgbToHsl(fallbackCandidate.r, fallbackCandidate.g, fallbackCandidate.b).s;
                 debug.primaryCandidate = { zone: primaryZoneName, color: candidate, saturation: s };

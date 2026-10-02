@@ -12,6 +12,7 @@
 
 import GdkPixbuf from 'gi://GdkPixbuf?version=2.0';
 import GLib from 'gi://GLib';
+import { trimBorders } from './borders.js';
 
 /**
  * Максимальная сторона изображения после downscale.
@@ -30,6 +31,9 @@ const DEFAULT_MAX_DIMENSION = 256;
  *
  * @param {string} imagePath - путь к файлу изображения
  * @param {number} [maxDimension=DEFAULT_MAX_DIMENSION] - максимальная сторона после downscale
+ * @param {{trim?: boolean}} [options] - trim (по умолчанию true): срезать чёрные
+ *   полосы letterbox/pillarbox и прозрачные поля (см. borders.js). В результате
+ *   поле `trimmed` описывает срез ({top,bottom,left,right,blackBars}) или null.
  * @returns {{
  *   width: number,
  *   height: number,
@@ -39,7 +43,7 @@ const DEFAULT_MAX_DIMENSION = 256;
  *   pixels: Uint8Array
  * }}
  */
-export function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION) {
+export function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION, options = {}) {
     let original;
     try {
         original = GdkPixbuf.Pixbuf.new_from_file(imagePath);
@@ -68,7 +72,7 @@ export function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION) {
     // работает по индексам в этом Uint8Array, не трогая GdkPixbuf снова.
     const pixels = scaled.get_pixels();
 
-    return {
+    const buffer = {
         width: scaled.get_width(),
         height: scaled.get_height(),
         channels: scaled.get_n_channels(),   // 3 (RGB) или 4 (RGBA)
@@ -76,6 +80,8 @@ export function extractPixels(imagePath, maxDimension = DEFAULT_MAX_DIMENSION) {
         hasAlpha: scaled.get_has_alpha(),
         pixels,                               // Uint8Array, длина = rowstride * height
     };
+
+    return (options.trim === false) ? { ...buffer, trimmed: null } : trimBorders(buffer);
 }
 
 /**

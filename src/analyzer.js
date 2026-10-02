@@ -10,6 +10,13 @@
 //   проход по пикселям зоны; picker дальше просто выбирает нужное поле.
 
 /**
+ * Пиксели с alpha ниже этого порога считаются прозрачными и в анализе
+ * не участвуют (иначе прозрачные пиксели читались бы как чёрные: у них
+ * RGB обычно 0,0,0). Для 3-канальных буферов alpha нет — все пиксели непрозрачны.
+ */
+export const ALPHA_MIN = 128;
+
+/**
  * RGB (0-255 каждый канал) → HSL (h: 0-360, s: 0-1, l: 0-1).
  * Нужен, потому что почти все стратегии picker'а (darkest/lightest/
  * most-saturated) оперируют в терминах HSL, а не сырого RGB.
@@ -80,6 +87,7 @@ function quantize(zone, bucket = 16) {
 
     for (let i = 0; i < width * height; i++) {
         const offset = i * channels;
+        if (channels === 4 && pixels[offset + 3] < ALPHA_MIN) continue;
         const r = pixels[offset];
         const g = pixels[offset + 1];
         const b = pixels[offset + 2];
@@ -174,9 +182,12 @@ export function analyzeZone(zone) {
     // исключений (агрегирующие метрики, выброс и так тонет в сумме).
     let sumR = 0, sumG = 0, sumB = 0;
     let sumL = 0, sumL2 = 0;
+    let opaqueCount = 0;
 
     for (let i = 0; i < pixelCount; i++) {
         const offset = i * channels;
+        if (channels === 4 && pixels[offset + 3] < ALPHA_MIN) continue;
+        opaqueCount++;
         const r = pixels[offset];
         const g = pixels[offset + 1];
         const b = pixels[offset + 2];
@@ -186,21 +197,27 @@ export function analyzeZone(zone) {
         sumL += l; sumL2 += l * l;
     }
 
+    // Зона целиком прозрачная — анализировать нечего. Не бросаем исключение:
+    // picker умеет уходить в fallback для пустых зон.
+    if (opaqueCount === 0) {
+        return { empty: true, pixelCount, opaqueCount: 0 };
+    }
+
     const average = {
-        r: Math.round(sumR / pixelCount),
-        g: Math.round(sumG / pixelCount),
-        b: Math.round(sumB / pixelCount),
+        r: Math.round(sumR / opaqueCount),
+        g: Math.round(sumG / opaqueCount),
+        b: Math.round(sumB / opaqueCount),
     };
 
-    const meanL = sumL / pixelCount;
-    const varianceL = (sumL2 / pixelCount) - (meanL * meanL);
+    const meanL = sumL / opaqueCount;
+    const varianceL = (sumL2 / opaqueCount) - (meanL * meanL);
     const uniformity = Math.max(0, 1 - Math.min(1, varianceL / 0.25));
 
     // --- Проход 2 (переиспользует quantize()): darkest/lightest/
     // mostSaturated/leastSaturated ищутся среди квантованных групп,
     // отфильтрованных по минимальному count — см. MIN_CANDIDATE_SHARE.
     const quantized = quantize(zone);
-    const minCount = Math.max(1, Math.ceil(pixelCount * MIN_CANDIDATE_SHARE));
+    const minCount = Math.max(1, Math.ceil(opaqueCount * MIN_CANDIDATE_SHARE));
     let candidates = quantized.filter((g) => g.count >= minCount);
 
     // Если фильтр отсёк ВСЕ группы (крайний случай — очень мелкая зона или
@@ -239,6 +256,7 @@ export function analyzeZone(zone) {
         average,
         uniformity,
         pixelCount,
+        opaqueCount,
     };
 }
 
