@@ -9,6 +9,8 @@
 //   пересчитывал бы сам. Так analyzer — единственное место, где происходит
 //   проход по пикселям зоны; picker дальше просто выбирает нужное поле.
 
+import { rgbToOklch, hueDistance } from './oklab.js';
+
 /**
  * Пиксели с alpha ниже этого порога считаются прозрачными и в анализе
  * не участвуют (иначе прозрачные пиксели читались бы как чёрные: у них
@@ -121,27 +123,71 @@ function quantize(zone, bucket = 16) {
 }
 
 /**
- * "Эффективная" насыщенность для целей picker'а — НЕ то же самое, что чистая
- * HSL-saturation. У HSL-saturation есть математическая особенность: у почти
- * чёрных или почти белых пикселей s может быть близка к 1.0 при мизерной
- * разнице между каналами (например rgb(3,2,0) → s≈1.0), хотя визуально это
- * шум/тень, а не "насыщенный цвет" в человеческом понимании.
+ * Параметры поиска «самого насыщенного» цвета (OKLCH).
  *
- * Штрафуем saturation на приближении lightness к 0 или к 1, чтобы кандидат
- * на mostSaturated не мог быть одновременно почти чёрным. Вес подобран так,
- * чтобы не отсеивать честные тёмно-насыщенные цвета (l=0.2-0.3 с высоким s
- * остаются кандидатами), но резать вырожденный случай l<0.05.
- *
- * @param {number} s - HSL saturation (0..1)
- * @param {number} l - HSL lightness (0..1)
- * @returns {number} 0..1
+ * Насыщенность меряем chroma в OKLCH, а не HSL-saturation: у HSL почти
+ * чёрные/почти белые пиксели «насыщены» (rgb(3,2,0) → s≈1), поэтому раньше
+ * приходилось штрафовать её по lightness. У OKLCH chroma вырожденных случаев
+ * нет, а у плавного градиента (свечение, закат) единый оттенок не дробится.
  */
-function effectiveSaturation(s, l) {
-    // Треугольная весовая функция: пик в l=0.5, спад к 0 на l=0 и l=1.
-    // На l=0.05 и l=0.95 вес уже ~0.1 — почти полностью гасит вырожденный
-    // случай, но не резко (без разрыва), чтобы не создавать новый артефакт.
-    const lightnessWeight = 1 - Math.pow(Math.abs(l - 0.5) * 2, 2);
-    return s * Math.max(0, lightnessWeight);
+const VIVID_MIN_CHROMA = 0.04;      // ниже — цвет считается серым и в кандидаты не идёт
+const VIVID_L_RANGE = [0.12, 0.97]; // у почти чёрного/белого chroma не информативна
+const VIVID_MIN_SHARE = 0.001;      // доля зоны, которую должен занимать ОТТЕНОК (±20°)
+const VIVID_HUE_WINDOW = 20;        // градусов: что считаем «тем же оттенком»
+
+/**
+ * Самый насыщенный цвет зоны с защитой от шума и бликов.
+ *
+ * Группы RGB-корзин по отдельности малы (плавный градиент рассыпается на
+ * десятки корзин по 0.2–0.4%), поэтому «присутствие» считается не по корзине,
+ * а по ОТТЕНКУ: суммарная доля всех хроматичных групп в пределах ±20° hue.
+ * Единичные шумовые пиксели (разные оттенки, по 0.01%) порог не проходят,
+ * а честный маленький акцент (0.1%+ площади) — проходит. Результат —
+ * среднее по «ядру» оттенка (группы с chroma ≥ 85% пика), а не один пиксель.
+ *
+ * @param {Array<{r:number,g:number,b:number,count:number}>} groups
+ * @param {number} opaqueCount
+ * @returns {{r:number,g:number,b:number}}
+ */
+function pickMostSaturated(groups, opaqueCount) {
+    const info = groups.map((g) => ({ g, ...rgbToOklch(g) }));
+    const chromatic = info.filter((x) =>
+        x.C >= VIVID_MIN_CHROMA && x.L >= VIVID_L_RANGE[0] && x.L <= VIVID_L_RANGE[1]);
+
+    if (chromatic.length === 0) {
+        // Ч/б или почти монохром: честно возвращаем наименее серую группу,
+        // дальше решает refine (там это «акцента нет»).
+        let best = info[0];
+        for (const x of info) if (x.C > best.C) best = x;
+        return { r: best.g.r, g: best.g.g, b: best.g.b };
+    }
+
+    // Гистограмма оттенка по 5° (кольцевая) → доля в окне ±VIVID_HUE_WINDOW.
+    const BINS = 72;
+    const hist = new Float64Array(BINS);
+    for (const x of chromatic) hist[Math.floor(x.h / 5) % BINS] += x.g.count;
+    const reach = Math.round(VIVID_HUE_WINDOW / 5);
+    const windowCount = (h) => {
+        const bin = Math.floor(h / 5) % BINS;
+        let sum = 0;
+        for (let d = -reach; d <= reach; d++) sum += hist[(bin + d + BINS) % BINS];
+        return sum;
+    };
+
+    const minCount = Math.max(2, Math.ceil(opaqueCount * VIVID_MIN_SHARE));
+    let candidates = chromatic.filter((x) => windowCount(x.h) >= minCount);
+    if (candidates.length === 0) candidates = chromatic; // крайний случай: не падаем
+
+    let peak = candidates[0];
+    for (const x of candidates) if (x.C > peak.C) peak = x;
+
+    let sr = 0, sg = 0, sb = 0, total = 0;
+    for (const x of candidates) {
+        if (hueDistance(x.h, peak.h) <= VIVID_HUE_WINDOW && x.C >= 0.85 * peak.C && Math.abs(x.L - peak.L) <= 0.2) {
+            sr += x.g.r * x.g.count; sg += x.g.g * x.g.count; sb += x.g.b * x.g.count; total += x.g.count;
+        }
+    }
+    return { r: Math.round(sr / total), g: Math.round(sg / total), b: Math.round(sb / total) };
 }
 
 /**
@@ -240,7 +286,6 @@ export function analyzeZone(zone) {
 
     let darkest = null, darkestL = Infinity;
     let lightest = null, lightestL = -Infinity;
-    let mostSaturated = null, mostSaturatedEffS = -Infinity;
     let leastSaturated = null, leastSaturatedS = Infinity;
 
     for (const c of candidates) {
@@ -249,11 +294,10 @@ export function analyzeZone(zone) {
         if (l < darkestL) { darkestL = l; darkest = { r: c.r, g: c.g, b: c.b }; }
         if (l > lightestL) { lightestL = l; lightest = { r: c.r, g: c.g, b: c.b }; }
 
-        const effS = effectiveSaturation(s, l);
-        if (effS > mostSaturatedEffS) { mostSaturatedEffS = effS; mostSaturated = { r: c.r, g: c.g, b: c.b }; }
-
         if (s < leastSaturatedS) { leastSaturatedS = s; leastSaturated = { r: c.r, g: c.g, b: c.b }; }
     }
+
+    const mostSaturated = pickMostSaturated(quantized, opaqueCount);
 
     const dominant = quantized[0]; // самый частый квантованный цвет (без фильтра — dominant это и есть "самый частый")
 

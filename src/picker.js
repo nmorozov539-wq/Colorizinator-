@@ -11,6 +11,19 @@
 // порядок разрешения зависимостей (топологическая сортировка).
 
 import { rgbToHsl } from './analyzer.js';
+import { mixOklab } from './oklab.js';
+
+/** Доля пути от bg к fg для `between-bg-fg` по умолчанию (роль surface — чуть светлее bg). */
+export const DEFAULT_BETWEEN_MIX = 0.12;
+
+/**
+ * Цвет «между bg и fg»: смешивание в OKLab (перцептивно ровное, в отличие
+ * от прежнего RGB-midpoint). Профиль может задать `mix` (0..1).
+ */
+export function pickBetween(bg, fg, roleConfig = {}) {
+    const t = typeof roleConfig.mix === 'number' ? roleConfig.mix : DEFAULT_BETWEEN_MIX;
+    return mixOklab(bg, fg, t);
+}
 
 /** Стратегии, которые не требуют другой уже выбранной роли — их можно
  *  вычислить сразу из analysis одной зоны. */
@@ -103,11 +116,7 @@ function pickRole(roleName, roleConfig, analysis, resolvedRoles) {
         if (!bg || !fg) {
             throw new Error(`pickRole("${roleName}"): between-bg-fg требует уже выбранных bg и fg`);
         }
-        const color = {
-            r: Math.round((bg.r + fg.r) / 2),
-            g: Math.round((bg.g + fg.g) / 2),
-            b: Math.round((bg.b + fg.b) / 2),
-        };
+        const color = pickBetween(bg, fg, roleConfig);
         debug.interpolatedBetween = ['bg', 'fg'];
         return { color, debug };
     }

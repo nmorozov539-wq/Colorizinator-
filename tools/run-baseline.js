@@ -1,44 +1,38 @@
 #!/usr/bin/env -S gjs -m
-// Харнесс: прогоняет реальный pipeline по списку файлов, печатает JSON-строки.
+// Харнесс: прогоняет реальный pipeline по списку файлов.
+//   gjs -m tools/run-baseline.js [--table] [--no-refine] файлы...
+// По умолчанию — JSON-строки (по одной на файл); --table — компактная таблица.
 import GLib from 'gi://GLib';
-import System from 'system';
-import { extractPixels } from '../src/extractor.js';
-import { cutAllZones } from '../src/zoner.js';
-import { analyzeAllZones } from '../src/analyzer.js';
-import { pickRoles } from '../src/picker.js';
-import { applyContrastCheck } from '../src/contrast.js';
+import { generatePalette } from '../src/pipeline.js';
 
-const TEST_ROLES = {
-    bg: { pick: 'darkest', from: 'bottom', fallback: 'full' },
-    fg: { pick: 'lightest', from: 'top', fallback: 'full' },
-    accent: { pick: 'most-saturated', from: 'bottom', 'min-saturation': 0.6, fallback: 'full' },
-    muted: { pick: 'least-saturated', from: 'top' },
-    surface: { pick: 'between-bg-fg' },
-};
-const hex = (c) => '#' + [c.r, c.g, c.b].map(v => v.toString(16).padStart(2, '0')).join('');
+const flags = ARGV.filter((a) => a.startsWith('--'));
+const FILES = ARGV.filter((a) => !a.startsWith('--'));
+const TABLE = flags.includes('--table');
+const REFINE = !flags.includes('--no-refine');
 
-const TABLE = ARGV[0] === '--table';
-const FILES = TABLE ? ARGV.slice(1) : ARGV;
+const hex = (c) => '#' + [c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('');
 
 for (const path of FILES) {
     const t0 = GLib.get_monotonic_time();
     const out = { file: path };
     try {
-        const buf = extractPixels(path);
-        out.trimmed = buf.trimmed;
-        const zones = cutAllZones(buf);
-        const analysis = analyzeAllZones(zones);
-        const { colors } = pickRoles(analysis, TEST_ROLES);
-        const { colors: final, debug } = applyContrastCheck(colors);
-        out.roles = Object.fromEntries(Object.entries(final).map(([k, v]) => [k, hex(v)]));
-        out.contrast = debug;
+        const { colors, debug } = generatePalette(path, { refine: REFINE });
+        out.roles = Object.fromEntries(Object.entries(colors).map(([k, v]) => [k, hex(v)]));
+        out.trimmed = debug.trimmed;
+        out.contrast = debug.contrast;
+        out.issues = debug.issues;
+        out.refine = debug.refine;
         out.ms = (GLib.get_monotonic_time() - t0) / 1000;
     } catch (e) {
         out.error = String(e.message || e);
     }
     if (!TABLE) { print(JSON.stringify(out)); continue; }
+
     const name = path.split('/').pop().padEnd(26);
     if (out.error) { print(`${name} ERROR ${out.error}`); continue; }
     const r = out.roles;
-    print(`${name} bg=${r.bg} fg=${r.fg} acc=${r.accent} mut=${r.muted} surf=${r.surface} ${out.contrast.finalRatio}:1 ${Math.round(out.ms)}ms`);
+    const acts = out.refine.map((t) => `${t.role}:${t.action}`).filter((s) => !s.endsWith(':kept')).join(' ');
+    const warn = out.issues.length ? `  ⚠ ${out.issues.join('; ')}` : '';
+    print(`${name} bg=${r.bg} fg=${r.fg} acc=${r.accent} mut=${r.muted} surf=${r.surface} ${out.contrast.finalRatio}:1 ${Math.round(out.ms)}ms${warn}`);
+    if (acts) print(`${''.padEnd(26)} [${acts}]`);
 }
