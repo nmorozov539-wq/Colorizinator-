@@ -70,9 +70,9 @@ export function relativeLuminance(r, g, b) {
 }
 
 /**
- * Квантизует зону в укрупнённую палитру (округление каждого RGB-канала
- * до ближайшего кратного `bucket`) и считает частоту каждого квантованного
- * цвета — это и есть "dominant" (по площади), в отличие от "average"
+ * Группирует пиксели зоны по укрупнённым корзинам (каждый RGB-канал,
+ * округлённый до кратного `bucket`) и считает частоту каждой группы;
+ * цвет группы — среднее её реальных пикселей, а не центр корзины — это и есть "dominant" (по площади), в отличие от "average"
  * (среднее всех пикселей, которое на пёстрых зонах даёт "грязный" цвет,
  * не встречающийся на самом изображении — см. обсуждение кейса "аниме":
  * много мелких разноцветных деталей размывают average в кашу).
@@ -92,22 +92,32 @@ function quantize(zone, bucket = 16) {
         const g = pixels[offset + 1];
         const b = pixels[offset + 2];
 
-        // Квантуем к центру корзины, а не к нижней границе — иначе
-        // "dominant" цвет будет систематически темнее реального пятна.
-        const qr = Math.min(255, Math.round(r / bucket) * bucket);
-        const qg = Math.min(255, Math.round(g / bucket) * bucket);
-        const qb = Math.min(255, Math.round(b / bucket) * bucket);
-        const key = `${qr},${qg},${qb}`;
+        // Корзина — только ключ группировки. Квантованный цвет НЕ становится
+        // результатом (иначе #12141c превращался бы в #101020 — цвет, которого
+        // на картинке нет): в группе копятся суммы реальных значений, а
+        // представитель считается как их среднее (см. ниже).
+        const key = (Math.round(r / bucket) << 16) | (Math.round(g / bucket) << 8) | Math.round(b / bucket);
 
         const existing = buckets.get(key);
         if (existing) {
             existing.count++;
+            existing.sr += r; existing.sg += g; existing.sb += b;
         } else {
-            buckets.set(key, { r: qr, g: qg, b: qb, count: 1 });
+            buckets.set(key, { count: 1, sr: r, sg: g, sb: b });
         }
     }
 
-    return Array.from(buckets.values()).sort((a, b) => b.count - a.count);
+    const groups = [];
+    for (const v of buckets.values()) {
+        groups.push({
+            r: Math.round(v.sr / v.count),
+            g: Math.round(v.sg / v.count),
+            b: Math.round(v.sb / v.count),
+            count: v.count,
+        });
+    }
+    // Детерминированный порядок: по count desc, при равенстве — по цвету.
+    return groups.sort((a, b) => (b.count - a.count) || (a.r - b.r) || (a.g - b.g) || (a.b - b.b));
 }
 
 /**

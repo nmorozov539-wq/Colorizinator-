@@ -17,7 +17,10 @@ const TEST_ROLES = {
 };
 const hex = (c) => '#' + [c.r, c.g, c.b].map(v => v.toString(16).padStart(2, '0')).join('');
 
-for (const path of ARGV) {
+const TABLE = ARGV[0] === '--table';
+const FILES = TABLE ? ARGV.slice(1) : ARGV;
+
+for (const path of FILES) {
     const t0 = GLib.get_monotonic_time();
     const out = { file: path };
     try {
@@ -33,5 +36,9 @@ for (const path of ARGV) {
     } catch (e) {
         out.error = String(e.message || e);
     }
-    print(JSON.stringify(out));
+    if (!TABLE) { print(JSON.stringify(out)); continue; }
+    const name = path.split('/').pop().padEnd(26);
+    if (out.error) { print(`${name} ERROR ${out.error}`); continue; }
+    const r = out.roles;
+    print(`${name} bg=${r.bg} fg=${r.fg} acc=${r.accent} mut=${r.muted} surf=${r.surface} ${out.contrast.finalRatio}:1 ${Math.round(out.ms)}ms`);
 }
